@@ -11,7 +11,8 @@ workspace notes: [`~/zephyrproject/README.md`](../../README.md).
 |---|---|
 | Board target | `rpi_pico2/rp2350a/m33_0` (Cortex-M33) |
 | Debug probe | SEGGER J-Link Base over SWD |
-| Console | UART0 — GP0 = TX, GP1 = RX, 115200 8N1 |
+| Console + shell | native USB (CDC-ACM), `/dev/ttyACM*` |
+| Application logs | UART0 — GP0 = TX, GP1 = RX, 115200 8N1, `/dev/ttyUSB*` |
 | User LED | `led0` alias, GPIO25 |
 | Zephyr | 4.5.0 |
 
@@ -93,21 +94,85 @@ thread apply all bt
 
 A full GDB cheat sheet is in the workspace README.
 
-## Console
+## Serial ports
+
+Two independent channels are available at the same time:
+
+| Channel | Port | Carries |
+|---|---|---|
+| Console + shell | Pico 2 native USB, `/dev/ttyACM*` | `printk`, shell prompt and commands |
+| Log output | UART0 on GP0/GP1, `/dev/ttyUSB*` | `LOG_*` records from the log subsystem |
+
+### USB console
 
 ```bash
-tio /dev/ttyACM0 -b 115200     # USB-UART adapter on GP0/GP1
-west rtt --runner jlink        # or RTT, no extra wiring
+ls /dev/ttyACM*                # a phone modem may already own ACM0
+tio /dev/ttyACM1 -b 115200     # baud is irrelevant for CDC-ACM
 ```
 
-Expected output:
+If you attach after boot, the prompt was already written and dropped: press
+Enter. Expected:
+
+```
+uart:~$ kernel version
+Zephyr version 4.5.0
+uart:~$
+```
+
+The device enumerates as `2fe3:0004` with product string `pico2-app console`.
+
+### UART0 logs
+
+Wire an external USB-UART adapter — **3.3 V logic, RP2350 pins are not 5 V
+tolerant**:
+
+| Adapter | Pico 2 pin | Signal |
+|---|---|---|
+| GND | 3 | GND |
+| TXD | 2 | GP1 / UART0 RX |
+| RXD | 1 | GP0 / UART0 TX |
+| VCC | — | not connected; power the Pico over its own USB |
+
+```bash
+stty -F /dev/ttyUSB0 115200 raw -echo
+cat /dev/ttyUSB0
+# or: tio /dev/ttyUSB0 -b 115200
+```
+
+Expected:
 
 ```
 [00:00:00.000,000] <inf> pico2_app: booting on rpi_pico2/rp2350a/m33_0
 [00:00:00.001,000] <inf> pico2_app: app_init() done, entering main loop
-[00:00:00.001,000] <inf> pico2_app: heartbeat 0: LED ON
-...
+[00:00:00.002,000] <inf> pico2_app: heartbeat 0: LED ON
 ```
+
+### How the split is configured
+
+`boards/rpi_pico2_rp2350a_m33_0.overlay` assigns one role per port:
+
+```dts
+chosen {
+	zephyr,console    = &cdc_acm_uart0;  /* printk + console */
+	zephyr,shell-uart = &cdc_acm_uart0;  /* interactive shell */
+	zephyr,log-uart   = &log_uarts;      /* LOG_* records */
+};
+```
+
+`zephyr,log-uart` points at a container node with `uarts = <&uart0>;`. Without
+it the UART log backend follows `zephyr,console`, which is why plain Zephyr can
+only log where the console is. Adding more phandles to `uarts` duplicates the
+log stream onto additional UARTs.
+
+`CONFIG_SHELL_LOG_BACKEND=n` keeps log records out of the USB shell stream, so
+the two ports stay independent. Set it to `y` to also see logs inside the
+shell.
+
+### Permissions
+
+`/dev/ttyACM*` and `/dev/ttyUSB*` are group `uucp` on Arch. If `tio` reports
+"Permission denied", the login session predates `usermod -aG uucp`: run
+`newgrp uucp` in that terminal, or log out and back in.
 
 ## Testing
 
@@ -116,9 +181,10 @@ Expected output:
 ```bash
 cd ~/zephyrproject
 .venv/bin/west twister -T apps/pico2-app -p rpi_pico2/rp2350a/m33_0 \
-  --device-testing --device-serial /dev/ttyACM0
+  --device-testing --device-serial /dev/ttyUSB0
 ```
 
+The test matches `LOG_INF` records, so it reads UART0, not the USB console.
 The Pico 2 is not emulated, so this needs the board attached; drop the
 `--device-testing` flags for a build-only check.
 
