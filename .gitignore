@@ -1,0 +1,19 @@
+# Build output
+build/
+build-*/
+*.o
+*.d
+*.a
+*.elf
+*.bin
+*.hex
+*.uf2
+*.map
+*.lst
+
+# Tooling
+.cache/
+compile_commands.json
+.vscode/
+.idea/
+*.swp

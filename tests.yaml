@@ -1,12 +1,18 @@
 sample:
-  name: Blinky Sample
+  name: Pico 2 Application
 tests:
-  sample.basic.blinky:
+  app.pico2.heartbeat:
     tags:
-      - LED
       - gpio
+      - led
     filter: dt_enabled_alias_with_parent_compat("led0", "gpio-leds")
     depends_on: gpio
-    harness: led
     integration_platforms:
-      - frdm_k64f
+      - rpi_pico2/rp2350a/m33_0
+    harness: console
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "heartbeat [0-9]+: LED ON"
+        - "heartbeat [0-9]+: LED OFF"
