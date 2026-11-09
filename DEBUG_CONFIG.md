@@ -14,7 +14,8 @@ board, and how to move them between USB and UART0. Read this before changing
 | Debug log copy | RTT (J-Link) | `debug.conf` → `CONFIG_LOG_BACKEND_RTT` |
 
 `make build` uses `debug.conf`, so debug builds emit logs on both UART0 and
-RTT. `make build EXTRA_CONF=` produces a release build with UART0 logs only.
+RTT. `make build EXTRA_CONF=` drops the debug fragment, but still keeps the USB
+console/shell and UART0 logs; it is not the board-default configuration.
 
 ## Configuration layers
 
@@ -35,21 +36,24 @@ replaces `prj.conf` instead of merging with it.
 | Goal | Command |
 |---|---|
 | USB console + shell, UART0 logs, RTT (default debug) | `make build && make flash` |
-| Same, release build (no RTT, no `-Og`) | `make build EXTRA_CONF= && make flash` |
+| Same USB/UART split, release build (no RTT, no `-Og`) | `make build EXTRA_CONF= && make flash` |
 | Everything on the USB cable, UART0 silent | `make build EXTRA_CONF="debug.conf;usb-only.conf" && make flash` |
 | Logs also echoed into the USB shell (UART0 still active) | add `CONFIG_SHELL_LOG_BACKEND=y` to a fragment, plus `CONFIG_SHELL_BACKEND_SERIAL_TX_RING_BUFFER_SIZE=1024` |
 | Change log verbosity | `CONFIG_LOG_DEFAULT_LEVEL` in `prj.conf`: `1` = error, `2` = warning, `3` = info (current), `4` = debug |
 | Remove only the RTT copy | `make build EXTRA_CONF=` or a fragment with `CONFIG_LOG_BACKEND_RTT=n` |
+| Return to Pico 2 board defaults (UART0 printk only, no shell, no logs, no USB) | see [Return to Pico 2 defaults](#return-to-pico-2-defaults) |
 | Inspect options interactively | `make menuconfig` (see the caveat below) |
 
 ### Everything on UART0 (no USB)
 
-Not provided as a fragment. The pieces are: the board already selects `uart0`
-for `zephyr,console` and `zephyr,shell-uart`, so remove the overlay's `chosen`
-overrides and the `cdc_acm_uart0` node, disable the USB device stack in a
-fragment (`CONFIG_USB_DEVICE_STACK_NEXT=n`, `CONFIG_CDC_ACM_SERIAL_*`), and
-keep `CONFIG_LOG_BACKEND_UART=y` with the `zephyr,log-uart` node. Build and
-test it before relying on it.
+This is **not** the same as the board defaults below: here the shell and
+logging stay enabled and move to UART0. Not provided as a fragment. The pieces
+are: the board already selects `uart0` for `zephyr,console` and
+`zephyr,shell-uart`, so remove the overlay's `chosen` overrides and the
+`cdc_acm_uart0` node, disable the USB device stack in a fragment
+(`CONFIG_USB_DEVICE_STACK_NEXT=n`, `CONFIG_CDC_ACM_SERIAL_*`), and keep
+`CONFIG_LOG_BACKEND_UART=y` with the `zephyr,log-uart` node. Build and test it
+before relying on it.
 
 ## Rules that bite
 
@@ -152,13 +156,95 @@ Caveats of single-cable mode:
   executes.
 - `/dev/ttyACM*` is assigned by the host and can change after a re-plug.
 
-## Stock Pico 2 defaults
+## Return to Pico 2 defaults
 
-For reference, a bare application with an empty `prj.conf` gets:
+The board defaults are not "everything on UART0": the shell and logging are
+disabled entirely. A stock build has:
 
 - `CONSOLE=y`, `SERIAL=y`, `UART_CONSOLE=y`, `UART_INTERRUPT_DRIVEN=y`
 - `zephyr,console = &uart0` and `zephyr,shell-uart = &uart0`, 115200 8N1
-- `CONFIG_PRINTK=y`, so `printk` output appears on UART0
+- `CONFIG_PRINTK=y`, so the boot banner and any `printk` calls appear on UART0
 - `CONFIG_LOG` **off** — `LOG_*` calls compile out
 - `CONFIG_SHELL` **off** — no `uart:~$` prompt
 - no USB console; CDC-ACM requires the overlay and USB stack enabled here
+
+All application output in this repo uses `LOG_INF`/`LOG_ERR`, so a stock build
+prints only the boot banner and then goes silent. The LED still blinks.
+
+### Procedure
+
+1. **Remove the board overlay.** Delete
+   `boards/rpi_pico2_rp2350a_m33_0.overlay`. It redirects the console and shell
+   to `cdc_acm_uart0`, adds `zephyr,log-uart`, and defines the CDC node.
+   Kconfig alone cannot move the console while the overlay still names it.
+   Without the overlay the board DTS supplies `zephyr,console = &uart0` and
+   `zephyr,shell-uart = &uart0`.
+
+2. **Prune `prj.conf`.** Remove the logging, shell, and USB/CDC settings:
+
+   ```kconfig
+   CONFIG_LOG=y
+   CONFIG_LOG_DEFAULT_LEVEL=3
+   CONFIG_LOG_BACKEND_UART=y
+
+   CONFIG_SHELL=y
+   CONFIG_SHELL_BACKEND_SERIAL=y
+   CONFIG_SHELL_LOG_BACKEND=n
+   CONFIG_SHELL_BACKEND_SERIAL_RX_RING_BUFFER_SIZE=128
+   CONFIG_SHELL_BACKEND_SERIAL_TX_RING_BUFFER_SIZE=128
+   CONFIG_USB_DEVICE_STACK_NEXT=y
+   CONFIG_CDC_ACM_SERIAL_INITIALIZE_AT_BOOT=y
+   CONFIG_CDC_ACM_SERIAL_PID=0x0004
+   CONFIG_CDC_ACM_SERIAL_PRODUCT_STRING="pico2-app console"
+   CONFIG_UART_LINE_CTRL=y
+   ```
+
+   Do **not** add `CONFIG_LOG=n` or `CONFIG_SHELL=n`: off is already the
+   default once the `=y` lines are gone. Keep unrelated settings
+   (`CONFIG_THREAD_NAME`, `CONFIG_MAIN_STACK_SIZE`); `CONFIG_GPIO=y` is already
+   enabled by the board defconfig. `CONFIG_STDOUT_CONSOLE=y` is default `y`, so
+   removing it is optional.
+
+3. **Build without the debug fragment.** `EXTRA_CONF=` is required: plain
+   `make build` merges `debug.conf` (RTT, thread info, `-Og`), and with
+   `LOG=n` the RTT log backend has nothing to send.
+
+   ```bash
+   source ~/zephyrproject/.venv/bin/activate
+   make build EXTRA_CONF=
+   make flash
+   ```
+
+4. **Use UART0 only.** Wire a 3.3 V USB-UART adapter to GP0 (TX), GP1 (RX), and
+   GND, then open the port:
+
+   ```bash
+   tio /dev/ttyUSB0 -b 115200
+   ```
+
+   Expected: the `*** Booting Zephyr OS ... ***` banner once, then no further
+   output and no prompt. The Pico's native USB no longer enumerates as
+   `2fe3:0004`, and no new `/dev/ttyACM*` appears.
+
+5. **Verify.**
+
+   ```bash
+   grep -E "CONFIG_(LOG|SHELL|PRINTK|CONSOLE|UART_CONSOLE)" build/zephyr/.config
+   grep -A4 "chosen {" build/zephyr/zephyr.dts
+   lsusb | grep -i 2fe3
+   ls /dev/ttyACM* 2>/dev/null
+   ```
+
+   Expect `# CONFIG_LOG is not set`, `# CONFIG_SHELL is not set`,
+   `CONFIG_PRINTK=y`, `CONFIG_UART_CONSOLE=y`, chosen console/shell on `uart0`,
+   and no USB device. The twister test in `tests.yaml` will fail in this
+   configuration because it expects `LOG_INF` records on UART0.
+
+6. **Roll back.** The current configuration is committed, so:
+
+   ```bash
+   git restore prj.conf boards/rpi_pico2_rp2350a_m33_0.overlay
+   make build                                        # split: USB console/shell, UART0 logs
+   # or: make build EXTRA_CONF="debug.conf;usb-only.conf"   # single cable
+   make flash
+   ```
