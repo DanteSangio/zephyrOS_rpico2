@@ -18,13 +18,17 @@ else
 EXTRA_ARGS := -DEXTRA_CONF_FILE=$(EXTRA_CONF)
 endif
 
+# Quote in the recipe: a fragment list such as "debug.conf;usb-only.conf"
+# contains a semicolon, which the shell would otherwise split.
+BUILD_EXTRA_ARGS = $(if $(EXTRA_ARGS),"$(EXTRA_ARGS)")
+
 .PHONY: all build flash debug attach rtt menuconfig pristine ram-report rom-report clean
 
 all: build
 
 build:
 	west build -p always -d $(BUILD_DIR) -b $(BOARD) . -- \
-		$(EXTRA_ARGS) \
+		$(BUILD_EXTRA_ARGS) \
 		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
 flash:

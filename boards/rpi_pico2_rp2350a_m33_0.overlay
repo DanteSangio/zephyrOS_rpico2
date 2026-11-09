@@ -6,6 +6,12 @@
  * Console and shell live on the Pico 2 native USB port (CDC-ACM).
  * Application logs are routed to UART0 (GP0 = TX, GP1 = RX), which is where
  * the external USB-UART converter is connected.
+ *
+ * Serial role map:
+ *   console -> cdc_acm_uart0 (USB)  zephyr,console
+ *   shell   -> cdc_acm_uart0 (USB)  zephyr,shell-uart
+ *   logs    -> uart0 (GP0/GP1)      zephyr,log-uart
+ * Recipes for moving any of these: see DEBUG_CONFIG.md.
  */
 
 / {

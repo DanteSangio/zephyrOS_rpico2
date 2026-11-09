@@ -44,6 +44,7 @@ Do not use Zephyr's `CONF_FILE` CMake variable for this: it *replaces*
 ├── CMakeLists.txt                    # app entry point, lists the sources
 ├── prj.conf                          # application Kconfig (all boards)
 ├── debug.conf                        # debug-only Kconfig fragment
+├── usb-only.conf                     # single-cable USB fragment
 ├── boards/                           # per-board .conf/.overlay, see boards/README.md
 ├── src/
 │   ├── main.c                        # boot, logging, calls into the app
@@ -51,6 +52,7 @@ Do not use Zephyr's `CONF_FILE` CMake variable for this: it *replaces*
 │   └── app.h
 ├── tests.yaml                        # twister metadata
 ├── Makefile                          # shortcuts around west
+├── DEBUG_CONFIG.md                   # console/shell/log routing and recipes
 └── .editorconfig, .clang-format      # Zephyr coding style
 ```
 
@@ -60,6 +62,9 @@ workspace by walking up to `~/zephyrproject/.west`. Never edit
 `prj.conf` and devicetree overlays instead.
 
 ## Configuration
+
+See [`DEBUG_CONFIG.md`](DEBUG_CONFIG.md) for the full console/shell/log routing
+matrix, recipes, and the Kconfig defaults that make the layers interact.
 
 - **Kconfig** — `prj.conf` holds options common to every board. The board
   defconfig already enables `CONSOLE`, `SERIAL`, `UART_CONSOLE`, `GPIO`,
@@ -167,6 +172,16 @@ log stream onto additional UARTs.
 `CONFIG_SHELL_LOG_BACKEND=n` keeps log records out of the USB shell stream, so
 the two ports stay independent. Set it to `y` to also see logs inside the
 shell.
+
+To drop the external converter entirely and carry console, shell, and logs on
+the USB cable, build with the `usb-only.conf` fragment:
+
+```bash
+make build EXTRA_CONF="debug.conf;usb-only.conf"
+make flash
+```
+
+See [`DEBUG_CONFIG.md`](DEBUG_CONFIG.md) for details and rollback.
 
 ### Permissions
 
